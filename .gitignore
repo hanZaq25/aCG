@@ -1,0 +1,30 @@
+matrix
+# Build artifacts
+build/
+bin/
+obj/
+*.o
+*.out
+*.exe
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
