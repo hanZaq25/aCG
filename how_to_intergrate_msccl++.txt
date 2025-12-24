@@ -1,0 +1,2 @@
+1- build msccl++
+2- Edit cuda/CMakeLists.txt
