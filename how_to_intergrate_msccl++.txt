@@ -1,2 +1,4 @@
 1- build msccl++
-2- Edit cuda/CMakeLists.txt
+2- Added FindMSCCLPP.cmake
+3- Edit cuda/CMakeLists.txt
+4- build acg with msccl++

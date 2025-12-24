@@ -23,3 +23,11 @@ tar -xzf audikw_1.tar.gz
 mpirun -np 4 acg-cuda -q --output-comm-matrix --manufactured-solution --seed 101 --residual-atol 0 --residual-rtol 1e-6 --max-iterations 100000 --solver acg --comm nccl ../../matrix/audikw_1/audikw_1.mtx
 mpirun -np 4 acg-cuda -q --output-comm-matrix --manufactured-solution --seed 101 --residual-atol 0 --residual-rtol 1e-6 --max-iterations 100000 --solver acg --comm nccl ../../matrix/Queen_4147/Queen_4147.mtx
 mpirun -np 4 acg-cuda -q --output-comm-matrix --manufactured-solution --seed 101 --residual-atol 0 --residual-rtol 1e-6 --max-iterations 100000 --solver acg --comm nccl ../../matrix/Bump_2911/Bump_2911.mtx
+
+-------------------------------------------
+aCG & MSCCL++:
+cmake -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.3/bin/nvcc \
+      -DCMAKE_CUDA_ARCHITECTURES=80 \
+      -DUSE_MSCCLPP=ON \
+      -DMSCCLPP_HOME=$HOME/mscclpp_double \
+      ..
