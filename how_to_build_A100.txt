@@ -14,6 +14,11 @@ cmake -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.3/bin/nvcc \
       ..
 
 make 
+
+### install matrix:
+wget https://suitesparse-collection-website.herokuapp.com/MM/GHS_psdef/audikw_1.tar.gz 
+tar -xzf audikw_1.tar.gz
+
 ### Run:
 mpirun -np 4 acg-cuda -q --output-comm-matrix --manufactured-solution --seed 101 --residual-atol 0 --residual-rtol 1e-6 --max-iterations 100000 --solver acg --comm nccl ../../matrix/audikw_1/audikw_1.mtx
 mpirun -np 4 acg-cuda -q --output-comm-matrix --manufactured-solution --seed 101 --residual-atol 0 --residual-rtol 1e-6 --max-iterations 100000 --solver acg --comm nccl ../../matrix/Queen_4147/Queen_4147.mtx
