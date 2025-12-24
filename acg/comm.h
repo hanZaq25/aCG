@@ -43,6 +43,10 @@
 #ifdef ACG_HAVE_NCCL
 #include <nccl.h>
 #endif
+#ifdef ACG_HAVE_MSCCLPP
+/* Forward declaration - actual include in .c file to avoid C++ header issues */
+typedef struct mscclpp_comm_opaque* mscclpp_comm_t;
+#endif
 #ifdef ACG_HAVE_HIP
 #include <hip/hip_runtime_api.h>
 #endif
@@ -86,6 +90,7 @@ enum acgcommtype
     acgcomm_null,     /* null communicator */
     acgcomm_mpi,      /* MPI communicator */
     acgcomm_nccl,     /* NCCL communicator */
+    acgcomm_mscclpp,  /* MSCCLPP communicator */
     acgcomm_rccl,     /* RCCL communicator */
     acgcomm_nvshmem,  /* NVSHMEM communicator */
     acgcomm_rocshmem,  /* rocSHMEM communicator */
@@ -114,6 +119,10 @@ struct acgcomm
 #if defined(ACG_HAVE_NCCL) || defined(ACG_HAVE_RCCL)
     ncclComm_t ncclcomm;
 #endif
+
+#if defined(ACG_HAVE_MSCCLPP)
+    mscclpp_comm_t mscclppcomm;
+#endif
 };
 
 #if defined(ACG_HAVE_MPI)
@@ -136,6 +145,17 @@ ACG_API int acgcomm_init_nccl(
     struct acgcomm * comm,
     ncclComm_t ncclcomm,
     int * ncclerrcode);
+#endif
+
+#if defined(ACG_HAVE_MSCCLPP)
+/**
+ * 'acgcomm_init_mscclpp()' creates a communicator from a given MSCCLPP
+ * communicator.
+ */
+ACG_API int acgcomm_init_mscclpp(
+    struct acgcomm * comm,
+    mscclpp_comm_t mscclppcomm,
+    int * mscclpperrcode);
 #endif
 
 #if defined(ACG_HAVE_RCCL)
@@ -208,6 +228,13 @@ ACG_API MPI_Datatype acgdatatype_mpi(enum acgdatatype datatype);
 ACG_API ncclDataType_t acgdatatype_nccl(enum acgdatatype datatype);
 #endif
 
+#if defined(ACG_HAVE_MSCCLPP)
+/**
+ * 'acgdatatype_mscclpp()' returns size for MSCCLPP data type.
+ * MSCCLPP uses size-based operations rather than typed operations.
+ */
+ACG_API size_t acgdatatype_mscclpp(enum acgdatatype datatype);
+#endif
 /*
  * operations
  */
@@ -240,6 +267,7 @@ ACG_API MPI_Op acgop_mpi(enum acgop op);
 ACG_API ncclRedOp_t acgop_nccl(enum acgop op);
 #endif
 
+// MSCCLPP?
 /*
  * collective communication
  */
