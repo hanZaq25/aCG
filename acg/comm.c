@@ -64,6 +64,7 @@ const char * acgcommtypestr(enum acgcommtype commtype)
     if (commtype == acgcomm_null) { return "null"; }
     else if (commtype == acgcomm_mpi) { return "mpi"; }
     else if (commtype == acgcomm_nccl) { return "nccl"; }
+    else if (commtype == acgcomm_mscclpp) { return "mscclpp"; }
     else if (commtype == acgcomm_nvshmem) { return "nvshmem"; }
     else { return "unknown"; }
 }
@@ -109,6 +110,25 @@ int acgcomm_init_nccl(
 }
 #endif
 
+#if defined(ACG_HAVE_MSCCLPP)
+/**
+ * 'acgcomm_init_mscclpp()' creates a communicator from a given MSCCLPP
+ * communicator.
+ */
+int acgcomm_init_mscclpp(
+    struct acgcomm * comm,
+    mscclpp_comm_t mscclppcomm,
+    int * mscclpperrcode)
+{
+    /* Store the MSCCLPP communicator handle
+     * Note: MSCCLPP communicator lifecycle is managed externally
+     */
+    comm->mscclppcomm = mscclppcomm;
+    comm->type = acgcomm_mscclpp;
+    return ACG_SUCCESS;
+}
+#endif
+
 #if defined(ACG_HAVE_RCCL)
 /**
  * ‘acgcomm_init_rccl()’ creates a communicator from a given RCCL
@@ -139,6 +159,10 @@ void acgcomm_free(
 #if defined(ACG_HAVE_NCCL)
     /* if (comm->type == acgcomm_nccl) ncclCommDestroy(comm->ncclcomm); */
 #endif
+#if defined(ACG_HAVE_MSCCLPP)
+    /* MSCCLPP communicator cleanup handled externally */
+    if (comm->type == acgcomm_mscclpp) { /* no-op for now */ }
+#endif
 #if defined(ACG_HAVE_RCCL)
     /* if (comm->type == acgcomm_rccl) ncclCommDestroy(comm->ncclcomm); */
 #endif
@@ -167,6 +191,13 @@ int acgcomm_size(
         int err = ncclCommCount(comm->ncclcomm, commsize);
         if (err != ncclSuccess) return ACG_ERR_NCCL;
         return ACG_SUCCESS;
+    }
+#endif
+#if defined(ACG_HAVE_MSCCLPP)
+    else if (comm->type == acgcomm_mscclpp) {
+        /* MSCCLPP size query - would need wrapper function */
+        /* For now, return error indicating not implemented */
+        return ACG_ERR_MSCCLPP_NOT_SUPPORTED;
     }
 #endif
 #if defined(ACG_HAVE_RCCL)
@@ -204,6 +235,12 @@ int acgcomm_rank(
         int err = ncclCommUserRank(comm->ncclcomm, rank);
         if (err != ncclSuccess) return ACG_ERR_NCCL;
         return ACG_SUCCESS;
+    }
+#endif
+#if defined(ACG_HAVE_MSCCLPP)
+    else if (comm->type == acgcomm_mscclpp) {
+        /* MSCCLPP rank query - would need wrapper function */
+        return ACG_ERR_MSCCLPP_NOT_SUPPORTED;
     }
 #endif
 #if defined(ACG_HAVE_RCCL)
@@ -265,6 +302,18 @@ ncclDataType_t acgdatatype_nccl(enum acgdatatype datatype)
 {
     if (datatype == ACG_DOUBLE) return ncclDouble;
     return -1;
+}
+#endif
+
+#if defined(ACG_HAVE_MSCCLPP)
+/**
+ * 'acgdatatype_mscclpp()' returns size for MSCCLPP data type.
+ * MSCCLPP uses size-based operations rather than typed operations.
+ */
+size_t acgdatatype_mscclpp(enum acgdatatype datatype)
+{
+    if (datatype == ACG_DOUBLE) return sizeof(double);
+    return 0;
 }
 #endif
 
@@ -333,6 +382,15 @@ int acgcomm_barrier(
 #else
         return ACG_ERR_NCCL_NOT_SUPPORTED;
 #endif
+    } else if (comm->type == acgcomm_mscclpp) {
+#if defined(ACG_HAVE_MSCCLPP)
+        /* MSCCLPP barrier implementation would go here */
+        /* For now, synchronize the stream as a placeholder */
+        cudaStreamSynchronize(stream);
+        return ACG_SUCCESS;
+#else
+        return ACG_ERR_MSCCLPP_NOT_SUPPORTED;
+#endif
     } else if (comm->type == acgcomm_nvshmem) {
 #if defined(ACG_HAVE_NVSHMEM)
         acg_nvshmemx_barrier_all_on_stream(stream);
@@ -377,6 +435,18 @@ int acgcomm_allreduce(
         if (err != ncclSuccess) { if (errcode) *errcode = err; return ACG_ERR_NCCL; }
 #else
         return ACG_ERR_NCCL_NOT_SUPPORTED;
+#endif
+    } else if (comm->type == acgcomm_mscclpp) {
+#if defined(ACG_HAVE_MSCCLPP)
+        /* MSCCLPP allreduce implementation would go here
+         * This would require:
+         * 1. Creating/loading an execution plan for allreduce
+         * 2. Executing the plan with the given buffers
+         * 3. Handling the stream synchronization
+         */
+        return ACG_ERR_MSCCLPP_NOT_SUPPORTED;
+#else
+        return ACG_ERR_MSCCLPP_NOT_SUPPORTED;
 #endif
     } else if (comm->type == acgcomm_nvshmem) {
 #if defined(ACG_HAVE_NVSHMEM)
