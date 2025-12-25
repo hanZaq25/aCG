@@ -168,6 +168,16 @@ const char * acgerrcodestr(
             return "unknown NCCL error";
 #endif
         }
+    case ACG_ERR_MSCCLPP:
+        {
+#ifdef ACG_HAVE_MSCCLPP
+            /* MSCCLPP uses C++ exceptions rather than error codes.
+             * Error details should be captured in the exception message
+             * when the error occurs. */
+            return "MSCCLPP error (check stderr for details)";
+#else
+            return "unknown MSCCLPP error";
+#endif
     case ACG_ERR_NVSHMEM:
         {
 #ifdef ACG_HAVE_NVSHMEM
@@ -241,6 +251,7 @@ const char * acgerrcodestr(
         }
     case ACG_ERR_MPI_NOT_SUPPORTED: return "MPI is disabled; please rebuild with MPI support";
     case ACG_ERR_NCCL_NOT_SUPPORTED: return "NCCL is disabled; please rebuild with NCCL support";
+    case ACG_ERR_MSCCLPP_NOT_SUPPORTED: return "MSCCLPP is disabled; please rebuild with MSCCLPP support";
     case ACG_ERR_NVSHMEM_NOT_SUPPORTED: return "NVSHMEM is disabled; please rebuild with NVSHMEM support";
     case ACG_ERR_RCCL_NOT_SUPPORTED: return "RCCL is disabled; please rebuild with RCCL support";
     case ACG_ERR_ROCSHMEM_NOT_SUPPORTED: return "ROCSHMEM is disabled; please rebuild with ROCSHMEM support";
