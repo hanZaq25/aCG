@@ -43,6 +43,9 @@
  #ifdef ACG_HAVE_NCCL
  #include <nccl.h>
  #endif
+ #ifdef ACG_HAVE_MSCCLPP
+ #include <mscclpp/core.hpp>
+ #endif
  #ifdef ACG_HAVE_HIP
  #include <hip/hip_runtime_api.h>
  #endif
@@ -87,6 +90,7 @@
      acgcomm_mpi,      /* MPI communicator */
      acgcomm_nccl,     /* NCCL communicator */
      acgcomm_rccl,     /* RCCL communicator */
+     acgcomm_mscclpp,  /* MSCCL++ communicator */ 
      acgcomm_nvshmem,  /* NVSHMEM communicator */
      acgcomm_rocshmem,  /* rocSHMEM communicator */
  };
@@ -114,6 +118,11 @@
  #if defined(ACG_HAVE_NCCL) || defined(ACG_HAVE_RCCL)
      ncclComm_t ncclcomm;
  #endif
+
+ #if defined(ACG_HAVE_MSCCLPP)
+    mscclpp::Communicator* mscclppcomm;  // (pointer because it's C++)
+#endif
+
  };
  
  #if defined(ACG_HAVE_MPI)
@@ -148,6 +157,17 @@
      ncclComm_t ncclcomm,
      int * rcclerrcode);
  #endif
+
+ #if defined(ACG_HAVE_MSCCLPP)
+/**
+ * 'acgcomm_init_mscclpp()' creates a communicator from a given MSCCL++
+ * communicator.
+ */
+ACG_API int acgcomm_init_mscclpp(
+    struct acgcomm * comm,
+    mscclpp::Communicator* mscclppcomm,
+    int * mscclpperrcode);
+#endif
  
  /**
   * ‘acgcomm_free()’ frees resources associated with a communicator.
