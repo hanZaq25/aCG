@@ -2,3 +2,5 @@
 2- Added FindMSCCLPP.cmake
 3- Edit cuda/CMakeLists.txt
 4- build acg with msccl++
+5- edited comm.c, comm.h, error.c, error.halo
+6- added comm_mscclpp.cpp ( C++ wraper)
