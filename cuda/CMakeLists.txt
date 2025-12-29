@@ -4,7 +4,7 @@
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
-# files (the “Software”), to deal in the Software without
+# files (the "Software"), to deal in the Software without
 # restriction, including without limitation the rights to use, copy,
 # modify, merge, publish, distribute, sublicense, and/or sell copies
 # of the Software, and to permit persons to whom the Software is
@@ -13,7 +13,7 @@
 # The above copyright notice and this permission notice shall be
 # included in all copies or substantial portions of the Software.
 #
-# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 # EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 # MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
 # NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
@@ -136,8 +136,11 @@ option(USE_MSCCLPP "Enable MSCCLPP support" OFF)
 if(USE_MSCCLPP)
     find_package(MSCCLPP)
     if(MSCCLPP_FOUND)
-        add_definitions(-DHAVE_MSCCLPP)
+        add_definitions(-DACG_HAVE_MSCCLPP)
+        # Add MSCCLPP include directories globally so C files can find the headers
         include_directories(${MSCCLPP_INCLUDE_DIR})
+        message(STATUS "MSCCLPP support enabled")
+        message(STATUS "MSCCLPP include directory: ${MSCCLPP_INCLUDE_DIR}")
     else()
         message(WARNING "MSCCLPP not found. Disabling MSCCLPP support.")
         set(USE_MSCCLPP OFF)
@@ -211,6 +214,11 @@ endif ()
 if (NCCL_FOUND)
   target_include_directories(${PROJECT_NAME} PRIVATE ${NCCL_INCLUDE_DIR})
   target_link_libraries(${PROJECT_NAME} ${NCCL_LIBRARY})
+endif ()
+if (USE_MSCCLPP AND MSCCLPP_FOUND)
+  # Note: include_directories was already called above when MSCCLPP was found
+  target_link_libraries(${PROJECT_NAME} ${MSCCLPP_LIBRARY})
+  message(STATUS "Linking MSCCLPP library: ${MSCCLPP_LIBRARY}")
 endif ()
 if (NVSHMEM_FOUND)
   target_include_directories(${PROJECT_NAME} PRIVATE ${NVSHMEM_INCLUDE_DIRS})

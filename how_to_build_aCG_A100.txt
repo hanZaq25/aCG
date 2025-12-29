@@ -29,5 +29,7 @@ aCG & MSCCL++:
 cmake -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.3/bin/nvcc \
       -DCMAKE_CUDA_ARCHITECTURES=80 \
       -DUSE_MSCCLPP=ON \
-      -DMSCCLPP_HOME=$HOME/mscclpp_double \
+      -DMSCCLPP_ROOT=$HOME/mscclpp_double \
+      -DMSCCLPP_INCLUDE_DIR=$HOME/mscclpp_double/build/include \
+      -DMSCCLPP_LIBRARY=$HOME/mscclpp_double/build/lib/libmscclpp.so \
       ..
