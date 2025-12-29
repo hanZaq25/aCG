@@ -71,6 +71,11 @@
  #include <nccl.h>
  #endif
  
+
+ #ifdef ACG_HAVE_MSCCLPP
+ #include <mscclpp/core.hpp>
+ #endif
+
  #include <float.h>
  #include <stdarg.h>
  #include <stdlib.h>
@@ -353,7 +358,7 @@
      fprintf(f, "  --warmup N            perform N warmup iterations. [10]\n");
      fprintf(f, "\n");
      fprintf(f, " Communication library options:\n");
-     fprintf(f, "  --comm TYPE           none, mpi, nccl or nvshmem. [mpi]\n");
+     fprintf(f, "  --comm TYPE           none, mpi, nccl, mscclpp or nvshmem. [mpi]\n");
      fprintf(f, "\n");
      fprintf(f, " Solver verification options:\n");
      fprintf(f, "  --manufactured-solution  Use a manufactured solution and right-hand side.\n");
@@ -416,6 +421,11 @@
     fprintf(f, "NVSHMEM: %d.%d.%d\n", nvshmemmajor, nvshmemminor, nvshmempatch);
  #else
     fprintf(f, "NVSHMEM: no\n");
+ #endif
+ #ifdef ACG_HAVE_MSCCLPP  
+   fprintf(f, "MSCCL++: yes\n");
+ #else
+   fprintf(f, "MSCCL++: no\n");
  #endif
  #ifdef ACG_HAVE_LIBZ
      fprintf(f, "zlib: "ZLIB_VERSION"\n");
@@ -742,6 +752,8 @@
                  args->commtype = acgcomm_nccl;
              } else if (strcasecmp(s, "nvshmem") == 0) {
                  args->commtype = acgcomm_nvshmem;
+             } else if (strcasecmp(s, "mscclpp") == 0) {  
+                 args->commtype = acgcomm_mscclpp;
              } else { return EINVAL; }
              (*nargs)++; argv++; continue;
          }
@@ -1009,6 +1021,7 @@
      int output_comm_matrix = args.output_comm_matrix;
      int use_nccl = args.commtype == acgcomm_nccl;
      int use_nvshmem = args.commtype == acgcomm_nvshmem;
+     int use_mscclpp = args.commtype == acgcomm_mscclpp;
      int use_petsc = (args.solvertype == acgsolver_petsc || args.solvertype == acgsolver_petsc_pipelined);
  
      /* select a CUDA device */
@@ -1139,6 +1152,34 @@
      }
  #endif
  
+
+/* initialise MSCCL++ */  
+#if defined(ACG_HAVE_MSCCLPP)
+    if (rank == root && use_mscclpp) {
+        fprintf(stderr, "MSCCL++ enabled\n");
+    }
+    mscclpp::UniqueId mscclppUid;
+    mscclpp::Communicator* mscclppComm = nullptr;
+    if (use_mscclpp) {
+        // Generate unique ID on root and broadcast
+        if (rank == root) {
+            mscclppUid = mscclpp::UniqueId::generate();
+        }
+        MPI_Bcast(&mscclppUid, sizeof(mscclppUid), MPI_BYTE, root, mpicomm);
+        
+        // Initialize MSCCL++ communicator
+        try {
+            mscclpp::Transport transport = mscclpp::Transport::CudaIpc;
+            mscclppComm = new mscclpp::Communicator(mscclppUid, rank, commsize, transport);
+        } catch (const std::exception& e) {
+            fprintf(stderr, "%s: %s:%d: mscclpp init failed: %s\n", 
+                    program_invocation_short_name, processorname, rank, e.what());
+            cudaDeviceReset();
+            MPI_Abort(mpicomm, EXIT_FAILURE);
+        }
+    }
+#endif
+
      if (rank == root) {
          if (args.solvertype == acgsolver_acg) {
              fprintf(stderr, "using aCG solver\n");
@@ -1160,48 +1201,65 @@
      }
  
      /* create communicator for acg solver */
-     struct acgcomm comm;
-     if (use_nccl) {
- #if defined(ACG_HAVE_NCCL)
-         if (rank == root) fprintf(stderr, "Using NCCL for communication\n");
-         int ncclerrcode;
-         err = acgcomm_init_nccl(&comm, ncclcomm, &ncclerrcode);
-         if (err) {
-             fprintf(stderr, "%s: %s:%d: acgcomm_init_nccl: %s (%d)\n", program_invocation_short_name, processorname, rank, acgerrcodestr(err,ncclerrcode), ncclerrcode);
-             ncclCommDestroy(ncclcomm);
-             cudaDeviceReset();
-         MPI_Abort(mpicomm, EXIT_FAILURE);
-         }
- #else
-         if (rank == root) fprintf(stderr, "%s:%d: %s\n", program_invocation_short_name, __LINE__, acgerrcodestr(ACG_ERR_NCCL_NOT_SUPPORTED,0));
-         cudaDeviceReset();
-         MPI_Abort(mpicomm, EXIT_FAILURE);
- #endif
-     } else if (use_nvshmem) {
- #if defined(ACG_HAVE_NVSHMEM)
-         if (rank == root) fprintf(stderr, "Using NVSHMEM for communication\n");
-         int nvshmemerrcode;
-         err = acgcomm_init_nvshmem(&comm, mpicomm, &nvshmemerrcode);
-         if (err) {
-             fprintf(stderr, "%s: %s:%d: acgcomm_init_nvshmem: %s (%d)\n", program_invocation_short_name, processorname, rank, acgerrcodestr(err,nvshmemerrcode), nvshmemerrcode);
-             cudaDeviceReset();
-         MPI_Abort(mpicomm, EXIT_FAILURE);
-         }
- #else
-         if (rank == root) fprintf(stderr, "%s:%d: %s\n", program_invocation_short_name, __LINE__, acgerrcodestr(ACG_ERR_NVSHMEM_NOT_SUPPORTED,0));
-         cudaDeviceReset();
-         MPI_Abort(mpicomm, EXIT_FAILURE);
- #endif
-     } else {
-         if (rank == root) fprintf(stderr, "Using MPI for communication\n");
-         err = acgcomm_init_mpi(&comm, mpicomm, &mpierrcode);
-         if (err) {
-             fprintf(stderr, "%s:%d: %s\n", program_invocation_short_name, __LINE__, acgerrcodestr(err,mpierrcode));
-             cudaDeviceReset();
-         MPI_Abort(mpicomm, EXIT_FAILURE);
-         }
-     }
- 
+struct acgcomm comm;
+if (use_nccl) {
+#if defined(ACG_HAVE_NCCL)
+    if (rank == root) fprintf(stderr, "Using NCCL for communication\n");
+    int ncclerrcode;
+    err = acgcomm_init_nccl(&comm, ncclcomm, &ncclerrcode);
+    if (err) {
+        fprintf(stderr, "%s: %s:%d: acgcomm_init_nccl: %s (%d)\n", program_invocation_short_name, processorname, rank, acgerrcodestr(err,ncclerrcode), ncclerrcode);
+        ncclCommDestroy(ncclcomm);
+        cudaDeviceReset();
+        MPI_Abort(mpicomm, EXIT_FAILURE);
+    }
+#else
+    if (rank == root) fprintf(stderr, "%s:%d: %s\n", program_invocation_short_name, __LINE__, acgerrcodestr(ACG_ERR_NCCL_NOT_SUPPORTED,0));
+    cudaDeviceReset();
+    MPI_Abort(mpicomm, EXIT_FAILURE);
+#endif
+} else if (use_nvshmem) {
+#if defined(ACG_HAVE_NVSHMEM)
+    if (rank == root) fprintf(stderr, "Using NVSHMEM for communication\n");
+    int nvshmemerrcode;
+    err = acgcomm_init_nvshmem(&comm, mpicomm, &nvshmemerrcode);
+    if (err) {
+        fprintf(stderr, "%s: %s:%d: acgcomm_init_nvshmem: %s (%d)\n", program_invocation_short_name, processorname, rank, acgerrcodestr(err,nvshmemerrcode), nvshmemerrcode);
+        cudaDeviceReset();
+        MPI_Abort(mpicomm, EXIT_FAILURE);
+    }
+#else
+    if (rank == root) fprintf(stderr, "%s:%d: %s\n", program_invocation_short_name, __LINE__, acgerrcodestr(ACG_ERR_NVSHMEM_NOT_SUPPORTED,0));
+    cudaDeviceReset();
+    MPI_Abort(mpicomm, EXIT_FAILURE);
+#endif
+} else if (use_mscclpp) {
+#if defined(ACG_HAVE_MSCCLPP)
+    if (rank == root) fprintf(stderr, "Using MSCCL++ for communication\n");
+    int mscclpperrcode;
+    err = acgcomm_init_mscclpp(&comm, mscclppComm, mpicomm, &mscclpperrcode);
+    if (err) {
+        fprintf(stderr, "%s: %s:%d: acgcomm_init_mscclpp: %s (%d)\n", 
+                program_invocation_short_name, processorname, rank, 
+                acgerrcodestr(err, mscclpperrcode), mscclpperrcode);
+        delete mscclppComm;
+        cudaDeviceReset();
+        MPI_Abort(mpicomm, EXIT_FAILURE);
+    }
+#else
+    if (rank == root) fprintf(stderr, "%s:%d: %s\n", program_invocation_short_name, __LINE__, acgerrcodestr(ACG_ERR_MSCCLPP_NOT_SUPPORTED,0));
+    cudaDeviceReset();
+    MPI_Abort(mpicomm, EXIT_FAILURE);
+#endif
+} else {
+    if (rank == root) fprintf(stderr, "Using MPI for communication\n");
+    err = acgcomm_init_mpi(&comm, mpicomm, &mpierrcode);
+    if (err) {
+        fprintf(stderr, "%s:%d: %s\n", program_invocation_short_name, __LINE__, acgerrcodestr(err,mpierrcode));
+        cudaDeviceReset();
+        MPI_Abort(mpicomm, EXIT_FAILURE);
+    }
+}
      /* initialise cuBLAS and cuSPARSE */
      cublasHandle_t cublas;
      cublasStatus_t cublaserr = cublasCreate(&cublas);
@@ -1213,6 +1271,9 @@
  #endif
  #ifdef ACG_HAVE_NCCL
          if (use_nccl) ncclCommDestroy(ncclcomm);
+ #endif
+ #ifdef ACG_HAVE_MSCCLPP 
+        if (use_mscclpp && mscclppComm) delete mscclppComm;
  #endif
          cudaDeviceReset();
          MPI_Abort(mpicomm, EXIT_FAILURE);
