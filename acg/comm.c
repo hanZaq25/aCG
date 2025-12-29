@@ -43,7 +43,10 @@
  #ifdef ACG_HAVE_RCCL
  #include <rccl/rccl.h>
  #endif
- 
+ #ifdef ACG_HAVE_MSCCLPP
+ #include <mscclpp/core.hpp>
+ #include <mscclpp/executor.hpp> // do we really need to include this?
+ #endif
  #include <errno.h>
  
  #include <stdio.h>
@@ -65,6 +68,7 @@
      else if (commtype == acgcomm_mpi) { return "mpi"; }
      else if (commtype == acgcomm_nccl) { return "nccl"; }
      else if (commtype == acgcomm_nvshmem) { return "nvshmem"; }
+     else if (commtype == acgcomm_mscclpp) { return "mscclpp"; }
      else { return "unknown"; }
  }
  
@@ -108,6 +112,66 @@
      return ACG_SUCCESS;
  }
  #endif
+
+ #if defined(ACG_HAVE_MSCCLPP)
+/**
+ * 'acgcomm_init_mscclpp()' creates a communicator from MSCCLPP.
+ * 
+ * @param comm The communicator to initialize
+ * @param mpicomm MPI communicator (MSCCLPP requires MPI for bootstrap)
+ * @param kernel Kernel type for allreduce (0-N, maps to -k flag)
+ * @param mpierrcode Error code output
+ */
+int acgcomm_init_mscclpp(
+    struct acgcomm * comm,
+    MPI_Comm mpicomm,
+    int kernel,
+    int * mpierrcode)
+{
+    try {
+        // Get MPI rank and size
+        int rank, size;
+        MPI_Comm_rank(mpicomm, &rank);
+        MPI_Comm_size(mpicomm, &size);
+        
+        // Create MSCCLPP communicator using MPI for bootstrap
+        auto bootstrap = std::make_shared<mscclpp::TcpBootstrap>(rank, size);
+        
+        // Initialize from MPI
+        MPI_Comm comm_dup;
+        int err = MPI_Comm_dup(mpicomm, &comm_dup);
+        if (err) { 
+            if (mpierrcode) *mpierrcode = err; 
+            return ACG_ERR_MPI; 
+        }
+        
+        bootstrap->initialize(comm_dup);
+        
+        comm->mscclppcomm = new mscclpp::Communicator(bootstrap);
+        comm->mscclpp_kernel = kernel;
+        comm->type = acgcomm_mscclpp;
+        
+        return ACG_SUCCESS;
+    } catch (const std::exception& e) {
+        fprintf(stderr, "MSCCLPP initialization failed: %s\n", e.what());
+        return ACG_ERR_MSCCLPP;
+    }
+}
+
+/**
+ * 'acgcomm_set_mscclpp_kernel()' sets the allreduce kernel type
+ */
+int acgcomm_set_mscclpp_kernel(
+    struct acgcomm * comm,
+    int kernel)
+{
+    if (comm->type != acgcomm_mscclpp) {
+        return ACG_ERR_INVALID_VALUE;
+    }
+    comm->mscclpp_kernel = kernel;
+    return ACG_SUCCESS;
+}
+#endif
  
  #if defined(ACG_HAVE_RCCL)
  /**
@@ -142,6 +206,12 @@
  #if defined(ACG_HAVE_RCCL)
      /* if (comm->type == acgcomm_rccl) ncclCommDestroy(comm->ncclcomm); */
  #endif
+ #if defined(ACG_HAVE_MSCCLPP)
+    if (comm->type == acgcomm_mscclpp) {
+        delete comm->mscclppcomm;
+        comm->mscclppcomm = nullptr;
+    }
+#endif
  #if defined(ACG_HAVE_NVSHMEM)
      if (comm->type == acgcomm_nvshmem) acgcomm_free_nvshmem(comm);
  #endif
@@ -176,6 +246,12 @@
          return ACG_SUCCESS;
      }
  #endif
+ #if defined(ACG_HAVE_MSCCLPP)
+    else if (comm->type == acgcomm_mscclpp) {
+        *commsize = comm->mscclppcomm->bootstrap()->getNranks();
+        return ACG_SUCCESS;
+    }
+#endif
  #if defined(ACG_HAVE_NVSHMEM)
      else if (comm->type == acgcomm_nvshmem) {
          return acgcomm_size_nvshmem(comm, commsize);
@@ -213,6 +289,12 @@
          return ACG_SUCCESS;
      }
  #endif
+ #if defined(ACG_HAVE_MSCCLPP)
+    else if (comm->type == acgcomm_mscclpp) {
+        *rank = comm->mscclppcomm->bootstrap()->getRank();
+        return ACG_SUCCESS;
+    }
+#endif
  #if defined(ACG_HAVE_NVSHMEM)
      else if (comm->type == acgcomm_nvshmem) {
          return acgcomm_rank_nvshmem(comm, rank);
@@ -333,7 +415,30 @@
  #else
          return ACG_ERR_NCCL_NOT_SUPPORTED;
  #endif
-     } else if (comm->type == acgcomm_nvshmem) {
+     } else if (comm->type == acgcomm_mscclpp) {
+#if defined(ACG_HAVE_MSCCLPP)
+        try {
+            // MSCCLPP barrier through dummy allreduce
+            int dummy = 0;
+            auto plan = mscclpp::ExecutionPlan::makeAllReducePlan(
+                *comm->mscclppcomm,
+                0,  // Use default kernel for barrier
+                &dummy,
+                &dummy,
+                sizeof(int),
+                mscclpp::DataType::INT32,
+                stream
+            );
+            plan->execute(stream);
+            cudaStreamSynchronize(stream);
+            return ACG_SUCCESS;
+        } catch (const std::exception& e) {
+            fprintf(stderr, "MSCCLPP barrier failed: %s\n", e.what());
+            if (errcode) *errcode = -1;
+            return ACG_ERR_MSCCLPP;
+        }
+#endif
+    } else if (comm->type == acgcomm_nvshmem) {
  #if defined(ACG_HAVE_NVSHMEM)
          acg_nvshmemx_barrier_all_on_stream(stream);
  #else
@@ -378,7 +483,38 @@
  #else
          return ACG_ERR_NCCL_NOT_SUPPORTED;
  #endif
-     } else if (comm->type == acgcomm_nvshmem) {
+     } else if (comm->type == acgcomm_mscclpp) {
+#if defined(ACG_HAVE_MSCCLPP)
+        if (datatype != ACG_DOUBLE) {
+            return ACG_ERR_INVALID_VALUE;
+        }
+        if (op != ACG_SUM) {
+            return ACG_ERR_INVALID_VALUE;
+        }
+        
+        try {
+            // Create execution plan for allreduce with specified kernel
+            auto plan = mscclpp::ExecutionPlan::makeAllReducePlan(
+                *comm->mscclppcomm,
+                comm->mscclpp_kernel,  // Use stored kernel type
+                (void*)(src == ACG_IN_PLACE ? dst : src),
+                dst,
+                count * sizeof(double),
+                mscclpp::DataType::FLOAT64,
+                stream
+            );
+            
+            // Execute the allreduce
+            plan->execute(stream);
+            
+            return ACG_SUCCESS;
+        } catch (const std::exception& e) {
+            fprintf(stderr, "MSCCLPP allreduce failed: %s\n", e.what());
+            if (errcode) *errcode = -1;
+            return ACG_ERR_MSCCLPP;
+        }
+        #endif
+        } else if (comm->type == acgcomm_nvshmem) {
  #if defined(ACG_HAVE_NVSHMEM)
          if (op == ACG_SUM) {
              err = acg_nvshmemx_double_sum_reduce_on_stream(
